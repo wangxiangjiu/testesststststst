@@ -36,6 +36,7 @@ class Client(BaseClient):
         encrypt_iv_mac = self.storage_server.get(self.username + "MAC")
         sign_iv_mac = self.storage_server.get(self.username + "Sign_MAC")
 
+        self.encryption_ivs = {}
         # Check if metadata has already been created
         if encrypt_iv is None and sign_iv is None and encrypt_iv_mac is None and sign_iv_mac is None:
             iv = self.crypto.get_random_bytes(32)
@@ -106,7 +107,8 @@ class Client(BaseClient):
             if chunk_size == 0:
                 chunk_size = 1
             values = self.return_values(total_num_bytes, chunk_size, value)
-
+            self.encryption_ivs[name] = []
+            print(values)
             i, new_values = self.i_new_values(values, name, key_encryption, key_auth, False)
 
             data_name = self.merkle_create_and_store(new_values, self.username, name, key_encryption, key_auth, i)
@@ -146,6 +148,7 @@ class Client(BaseClient):
             chunk_size = 1
         values = self.return_values(total_num_bytes, chunk_size, value)
         self.client_dictionary = {}
+        print(values)
         i, values = self.i_new_values(values, name, key_node.encryption, key_node.mac_keys, True)
         #print("\t\t OTHER-TREE")
         #for value in values:
@@ -154,7 +157,7 @@ class Client(BaseClient):
         #print("client_tree" + str(client_tree.data_pointer))
         #print("UPDATE-MERKLE")
         # if tmp_data_node.length != client_tree.length:
-        #     print("inside")
+        #     #print("inside")
         #     t_d_node = key_node
         #     # cnt = 0
         #     while isinstance(t_d_node, self.node):
@@ -164,8 +167,8 @@ class Client(BaseClient):
         #         key_node = t_d_node
         #         t_d_node, t_d_iv = self.fetch_and_decrypt(t_d_node.pointer, t_d_node.encryption, t_d_node.mac_keys)
         #     # 
-        #     print(before_node.pointer + " pointer 1")
-        #     print("\t" + key_node.pointer + " pointer 2")
+        #     #print(before_node.pointer + " pointer 1")
+        #     #print("\t" + key_node.pointer + " pointer 2")
         #     #print("\t" + t_d_node.pointer + " pointer 3")
         #     data_node.pointer = self.merkle_create_and_store(values, self.username, name, key_node.encryption, key_node.mac_keys, i)
         #     new_data_node_iv = self.crypto.get_random_bytes(16)
@@ -186,17 +189,29 @@ class Client(BaseClient):
         for chunk in values:
             # Create id and put chunk.
             value_id = self.crypto.symmetric_encrypt(self.crypto.cryptographic_hash(path_join(self.username, name) + "Data" + str(i), 'SHA256'), self.iv, 'AES', 'CBC', IV=None)
-            i = i + 1
          
             chunk_iv = self.crypto.get_random_bytes(16)
+            'Need to Store these ivs'
+            'Need to Store these ivs'
             if create_dict:
-                chunk_hash = self.encrypt_merkle(chunk, key_encryption, key_auth, chunk_iv)
+                chunk_iv = self.encryption_ivs[name][i-1]
+                #print(self.encryption_ivs[name])
+                #print("\t\t INSIDE")
+                #print(self.encryption_ivs[name][i-1])
+                self.encrypt_merkle(chunk, key_encryption, key_auth, chunk_iv)
                 self.client_dictionary[value_id] = chunk
+                #print(chunk_hash)
             else:
-                chunk_hash = self.encrypt_and_put(chunk, value_id, key_encryption, key_auth, chunk_iv) 
+                #print("First")
+                self.encryption_ivs[name].append(chunk_iv) 
+                self.encrypt_and_put(chunk, value_id, key_encryption, key_auth, chunk_iv) 
+                #print(chunk_hash)
             # Create merkel node.
+            chunk_hash = self.crypto.cryptographic_hash(chunk, 'SHA256')
             merkel_node = self.merkle_node(None, None, value_id, len(chunk), chunk_hash)
+            print(chunk + "\t\t" + chunk_hash[0:5])
             new_values.append(merkel_node)
+            i = i + 1
         return i, new_values
          
  
@@ -245,7 +260,8 @@ class Client(BaseClient):
             i = i + 1
             data1_iv = self.crypto.get_random_bytes(16)
             data2_iv = self.crypto.get_random_bytes(16)
-            encrypted1 = self.encrypt_and_put(values[j], data1_id, key_encryption, key_auth, data1_iv)
+            self.encrypt_and_put(values[j], data1_id, key_encryption, key_auth, data1_iv)
+            encrypted1 = values[j].crypto_hash
             #print("\t\t\t\t\t\t\t LEN_VALUES")
             #print(len(values))
             #print ("\t\t j:   " + str(j))
@@ -255,7 +271,8 @@ class Client(BaseClient):
                 new_pairs.append(values[j])
                 j = j + 1
                 continue
-            encrypted2 = self.encrypt_and_put(values[j+1], data2_id, key_encryption, key_auth, data2_iv)
+            self.encrypt_and_put(values[j+1], data2_id, key_encryption, key_auth, data2_iv)
+            encrypted2 = values[j+1].crypto_hash
             # Now I need to hash the two together.
             hash_value = self.crypto.cryptographic_hash(encrypted1 + encrypted2, 'SHA256')
             'making merkle nodes'
@@ -280,14 +297,14 @@ class Client(BaseClient):
         #print(client_tree)
         root_hash = server_tree.crypto_hash
         client_root_hash = client_tree.crypto_hash
-        #print(("\t\t" * layer) + str(layer) + "   " + root_hash[:5] + "    " + client_root_hash[:5])
+        print(("\t\t" * layer) + str(layer) + "   " + root_hash[:5] + "    " + client_root_hash[:5])
 
         # root is the root of the merkle  tree.
         if client_root_hash != root_hash:
             # split the file into two pieces according to the lengths of the subtree stored on the server.
             if server_tree.data_pointer is not None:
                 # if left_tree or right_tree is a leaf. Since the left and right have same length, only need to check one.
-                server_tree.crypto_hash = client_tree.crypto_hash
+                #server_tree.crypto_hash = client_tree.crypto_hash
                 #print(client_tree.data_pointer)
                 client_data = self.client_dictionary[client_tree.data_pointer]
                 #print("\t\t\t CLIENT-DATA")
@@ -312,7 +329,7 @@ class Client(BaseClient):
                 self.update_merkle_tree(name, server_left_node, client_left_tree, key_encryption, key_auth,server_left_tree_id, layer + 1)
                 self.update_merkle_tree(name, server_right_node, client_right_tree, key_encryption, key_auth, server_right_tree_id, layer + 1)
                 new_node_iv = self.crypto.get_random_bytes(16)
-                client_tree = self.merkle_node(server_left_tree_id, server_right_tree_id, client_tree.data_pointer, client_tree.length, client_tree.crypto_hash)
+                client_tree = self.merkle_node(server_left_tree_id, server_right_tree_id, client_tree.data_pointer, client_tree.length, client_root_hash)
                 self.encrypt_and_put(client_tree, curr_ptr, key_encryption, key_auth, new_node_iv)
 
     def create_client_tree(self, values, username, name, key_encryption, key_auth, i):
@@ -344,7 +361,8 @@ class Client(BaseClient):
             i = i + 1
             data1_iv = self.crypto.get_random_bytes(16)
             data2_iv = self.crypto.get_random_bytes(16)
-            encrypted1 = self.encrypt_merkle(values[j], key_encryption, key_auth, data1_iv)
+            self.encrypt_merkle(values[j], key_encryption, key_auth, data1_iv)
+            encrypted1 = values[j].crypto_hash
             #print("\t\t\t\t\t\t\t LEN_VALUES")
             #print(len(values))
             #print ("\t\t j:   " + str(j))
@@ -354,7 +372,8 @@ class Client(BaseClient):
                 new_pairs.append(values[j])
                 j = j + 1
                 continue
-            encrypted2 = self.encrypt_merkle(values[j+1], key_encryption, key_auth, data2_iv)
+            self.encrypt_merkle(values[j+1], key_encryption, key_auth, data2_iv)
+            encrypted2 = values[j+1].crypto_hash
             # Now I need to hash the two together.
             hash_value = self.crypto.cryptographic_hash(encrypted1 + encrypted2, 'SHA256')
             'making merkle nodes'
@@ -482,6 +501,24 @@ class Client(BaseClient):
         message_from = util.from_json_string(message_from)
         key_node = self.node(message_from[2], message_from[0], message_from[1])
         # store the key_node in the server.\
+
+        'Need to grab ivs for this file'
+        share_node, share_iv = self.fetch_and_decrypt(message_from[2], message_from[0], message_from[1])
+        # Recreate merkle tree
+        data_node = share_node
+        root_node = share_node
+        while isinstance(data_node, self.node):
+           root_node = data_node
+           data_node, data_iv = self.fetch_and_decrypt(data_node.pointer, data_node.encryption, data_node.mac_keys)
+           #if data_node is None:
+           #    return data_node
+        #self.merkle_tree = data_node
+        #self.client_dictionary[newname] = {}
+        self.encryption_ivs[newname] = []
+        self.reconstruct_merkle(data_node, root_node.encryption, root_node.mac_keys, newname) 
+ 
+        'Need to grab ivs for this file'
+
         key_node_id = self.crypto.symmetric_encrypt(self.crypto.cryptographic_hash(path_join(self.username, newname), 'SHA256'), self.iv, 'AES', 'CBC', IV=None)
         file_iv = self.crypto.get_random_bytes(16)
         self.encrypt_and_put(key_node, key_node_id, self.iv, self.iv_mac, file_iv)
@@ -491,6 +528,26 @@ class Client(BaseClient):
         user_list_id = self.crypto.symmetric_encrypt(self.crypto.cryptographic_hash(path_join(self.username, newname) + "User_lists", "SHA"), self.iv, 'AES', 'CBC', IV=None)
         self.encrypt_and_put(user_list, user_list_id, self.iv, self.iv_mac, userlist_iv)
     
+    def reconstruct_merkle(self, merkle_node, key_encryption, key_auth, filename):
+        'Reconstruct merkle tree'
+        if merkle_node.data_pointer is not None:
+            data_chunk, data_chunk_iv = self.fetch_and_decrypt(merkle_node.data_pointer, key_encryption, key_auth)
+            'Store the IVs'
+            self.encryption_ivs[filename].append(data_chunk_iv)
+            'Store the IVs'
+            #self.client_dictionary[filename][merkle_node.data_pointer] = data_chunk
+        else:
+            server_left_tree_id = merkle_node.left_child
+            server_left_node, iv = self.fetch_and_decrypt(server_left_tree_id, key_encryption, key_auth)
+            #self.client_dictionary[filename][server_left_tree_id] = server_left_node
+            server_right_tree_id = merkle_node.right_child
+            server_right_node, iv = self.fetch_and_decrypt(server_right_tree_id, key_encryption, key_auth)
+            #self.client_dictionary[filename][server_right_tree_id] = server_right_node
+             
+
+            self.reconstruct_merkle(server_left_node, key_encryption, key_auth, filename) 
+            self.reconstruct_merkle(server_right_node, key_encryption, key_auth, filename) 
+ 
     
     def revoke(self, user, filename):
         encrypt_filename = self.crypto.symmetric_encrypt(self.crypto.cryptographic_hash(path_join(self.username, filename), 'SHA256'), self.iv, 'AES', 'CBC', IV=None)
